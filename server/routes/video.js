@@ -37,7 +37,7 @@ function transcribeWithGroq(filePath, fileName) {
       method: 'POST',
       headers: {
         ...form.getHeaders(),
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
       },
     };
 
@@ -75,8 +75,9 @@ Provide a comprehensive analysis with the following sections:
 TRANSCRIPT:
 ${transcript}`;
 
+    const model = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
     const data = JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model,
       messages: [
         { role: 'system', content: 'You are an expert content analyst that provides detailed, well-structured analysis of video and audio content. Use markdown formatting.' },
         { role: 'user', content: prompt },
@@ -91,7 +92,7 @@ ${transcript}`;
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
         'Content-Length': Buffer.byteLength(data),
       },
     };

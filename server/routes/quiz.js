@@ -112,8 +112,9 @@ Return ONLY valid JSON array (no markdown, no code blocks):
   }
 ]`;
 
+    const model = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
     const payload = JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model,
       messages: [
         { role: 'system', content: 'You are a quiz generator. You ONLY respond with valid JSON arrays. No markdown, no code block fences, no explanation.' },
         { role: 'user', content: prompt },
@@ -128,7 +129,7 @@ Return ONLY valid JSON array (no markdown, no code blocks):
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
         'Content-Length': Buffer.byteLength(payload),
       },
     };

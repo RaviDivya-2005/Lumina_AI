@@ -62,8 +62,9 @@ Please provide:
 
 Be thorough in your analysis.`;
 
+    const model = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
     const payload = JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
+      model,
       messages: [
         { role: 'system', content: 'You are a document analysis assistant. Provide clear, structured analysis of document content.' },
         { role: 'user', content: prompt },
@@ -78,7 +79,7 @@ Be thorough in your analysis.`;
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
         'Content-Length': Buffer.byteLength(payload),
       },
     };

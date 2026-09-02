@@ -102,7 +102,9 @@ function callGroqAPI(messages) {
         groqMessages.push({ role: m.role, content: m.content || '' });
       }
     }
-    const model = hasImage ? 'llama-3.2-90b-vision-preview' : 'llama-3.3-70b-versatile';
+    const textModel = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
+    const visionModel = (process.env.GROQ_VISION_MODEL || 'llama-3.2-11b-vision-preview').trim();
+    const model = hasImage ? visionModel : textModel;
     const data = JSON.stringify({
       model,
       messages: groqMessages,
@@ -159,7 +161,9 @@ function callGroqStream(messages, onChunk, onDone, onError, imageBase64) {
     }
   }
 
-  const model = imageBase64 ? 'llama-3.2-90b-vision-preview' : 'llama-3.3-70b-versatile';
+  const textModel = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
+  const visionModel = (process.env.GROQ_VISION_MODEL || 'llama-3.2-11b-vision-preview').trim();
+  const model = imageBase64 ? visionModel : textModel;
 
   const payload = JSON.stringify({
     model,
