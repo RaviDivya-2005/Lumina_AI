@@ -62,44 +62,60 @@ Please provide:
 
 Be thorough in your analysis.`;
 
-    const model = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
-    const payload = JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: 'You are a document analysis assistant. Provide clear, structured analysis of document content.' },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.5,
-      max_tokens: 4096,
-    });
+    const primaryModel = (process.env.GROQ_MODEL || 'openai/gpt-oss-120b').trim();
+    const candidates = [primaryModel, 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b'].filter((v, i, a) => v && a.indexOf(v) === i);
 
-    const options = {
-      hostname: 'api.groq.com',
-      path: '/openai/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
+    let result = null;
+    let lastError = new Error('No models responded');
 
-    const result = await new Promise((resolve, reject) => {
-      const req = https.request(options, (res) => {
-        let body = '';
-        res.on('data', chunk => { body += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(body);
-            if (parsed.error) reject(new Error(parsed.error.message || 'Analysis failed'));
-            else resolve(parsed);
-          } catch { reject(new Error('Failed to parse analysis response')); }
+    for (const model of candidates) {
+      try {
+        const payload = JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: 'You are a document analysis assistant. Provide clear, structured analysis of document content.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.5,
+          max_tokens: 4096,
         });
-      });
-      req.on('error', reject);
-      req.write(payload);
-      req.end();
-    });
+
+        const options = {
+          hostname: 'api.groq.com',
+          path: '/openai/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        result = await new Promise((resolve, reject) => {
+          const req = https.request(options, (res) => {
+            let body = '';
+            res.on('data', chunk => { body += chunk; });
+            res.on('end', () => {
+              try {
+                const parsed = JSON.parse(body);
+                if (parsed.error) reject(new Error(parsed.error.message || 'Analysis failed'));
+                else resolve(parsed);
+              } catch { reject(new Error('Failed to parse analysis response')); }
+            });
+          });
+          req.on('error', reject);
+          req.write(payload);
+          req.end();
+        });
+
+        if (result) break;
+      } catch (err) {
+        console.warn(`Document analysis model '${model}' failed:`, err.message);
+        lastError = err;
+      }
+    }
+
+    if (!result) throw lastError;
 
     const analysis = result.choices?.[0]?.message?.content || 'No analysis generated';
 

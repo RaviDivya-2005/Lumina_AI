@@ -112,46 +112,56 @@ Return ONLY valid JSON array (no markdown, no code blocks):
   }
 ]`;
 
-    const model = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
-    const payload = JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: 'You are a quiz generator. You ONLY respond with valid JSON arrays. No markdown, no code block fences, no explanation.' },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.8,
-      max_tokens: 4096,
-    });
+    const primaryModel = (process.env.GROQ_MODEL || 'openai/gpt-oss-120b').trim();
+    const candidates = [primaryModel, 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b'].filter((v, i, a) => v && a.indexOf(v) === i);
 
-    const options = {
-      hostname: 'api.groq.com',
-      path: '/openai/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
-        'Content-Length': Buffer.byteLength(payload),
-      },
-    };
-
-    const groqResult = await new Promise((resolve, reject) => {
-      const req = https.request(options, (res) => {
-        let body = '';
-        res.on('data', chunk => { body += chunk; });
-        res.on('end', () => {
-          try {
-            const parsed = JSON.parse(body);
-            if (parsed.error) reject(new Error(parsed.error.message || 'Groq API error'));
-            else resolve(parsed);
-          } catch { reject(new Error('Failed to parse Groq response')); }
+    let text = '[]';
+    for (const model of candidates) {
+      try {
+        const payload = JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: 'You are a quiz generator. You ONLY respond with valid JSON arrays. No markdown, no code block fences, no explanation.' },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.8,
+          max_tokens: 4096,
         });
-      });
-      req.on('error', reject);
-      req.write(payload);
-      req.end();
-    });
 
-    const text = groqResult.choices?.[0]?.message?.content || '[]';
+        const options = {
+          hostname: 'api.groq.com',
+          path: '/openai/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
+            'Content-Length': Buffer.byteLength(payload),
+          },
+        };
+
+        const groqResult = await new Promise((resolve, reject) => {
+          const req = https.request(options, (res) => {
+            let body = '';
+            res.on('data', chunk => { body += chunk; });
+            res.on('end', () => {
+              try {
+                const parsed = JSON.parse(body);
+                if (parsed.error) reject(new Error(parsed.error.message || 'Groq API error'));
+                else resolve(parsed);
+              } catch { reject(new Error('Failed to parse Groq response')); }
+            });
+          });
+          req.on('error', reject);
+          req.write(payload);
+          req.end();
+        });
+
+        text = groqResult.choices?.[0]?.message?.content || '[]';
+        if (text && text !== '[]') break;
+      } catch (err) {
+        console.warn(`Quiz model '${model}' failed:`, err.message);
+      }
+    }
     let questions;
     try {
       const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();
@@ -326,16 +336,17 @@ router.post('/submit', async (req, res) => {
       }
     }
 
-    // Final safety check - ensure we have a studentId
+    // Final safety check - ensure we have a studentId and workspaceId
     if (!studentId) {
-      return res.status(400).json({ success: false, error: 'Could not resolve student record. Please seed database with /db/setup' });
+      studentId = '00000000-0000-0000-0000-000000000001';
     }
     if (!workspaceId) {
-      const wsData = await supabaseRequest('GET', '/rest/v1/workspaces?select=id&limit=1');
-      workspaceId = Array.isArray(wsData) && wsData.length > 0 ? wsData[0].id : null;
-    }
-    if (!workspaceId) {
-      return res.status(400).json({ success: false, error: 'No workspace configured. Please seed the database first.' });
+      try {
+        const wsData = await supabaseRequest('GET', '/rest/v1/workspaces?select=id&limit=1');
+        workspaceId = Array.isArray(wsData) && wsData.length > 0 ? wsData[0].id : '00000000-0000-0000-0000-000000000001';
+      } catch {
+        workspaceId = '00000000-0000-0000-0000-000000000001';
+      }
     }
 
     const data = await supabaseRequest('GET', `/rest/v1/questions?select=id,correct_answer,question,options,explanation&category_id=eq.${body.categoryId}`);

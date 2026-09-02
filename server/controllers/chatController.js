@@ -82,64 +82,79 @@ const createChat = async (req, res) => {
   }
 };
 
-function callGroqAPI(messages) {
-  return new Promise((resolve, reject) => {
-    const groqMessages = [
-      { role: 'system', content: `You are an intelligent educational assistant for an AI Learning Platform. Use normal spaces and valid Markdown. For a simple learning request such as "explain HTML", return exactly this easy-to-read structure: first, one concise explanatory paragraph of 3-5 sentences; then a blank line; then the bold label **Important Points:**; then 5-8 short numbered points. Put every numbered point on its own new line. Do not use underlined headings made with === or ---, do not add many sections, and do not include code unless the user explicitly asks for code. For greetings, reply in 1-2 friendly sentences. Keep all answers accurate, simple, and concise.` },
-    ];
-    let hasImage = false;
-    for (const m of messages) {
-      if (m.imageBase64) {
-        hasImage = true;
-        groqMessages.push({
-          role: 'user',
-          content: [
-            { type: 'text', text: m.content || 'Describe this image in detail.' },
-            { type: 'image_url', image_url: { url: m.imageBase64 } },
-          ],
-        });
-      } else {
-        groqMessages.push({ role: m.role, content: m.content || '' });
-      }
-    }
-    const textModel = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
-    const visionModel = (process.env.GROQ_VISION_MODEL || 'llama-3.2-11b-vision-preview').trim();
-    const model = hasImage ? visionModel : textModel;
-    const data = JSON.stringify({
-      model,
-      messages: groqMessages,
-      temperature: 0.7,
-      max_tokens: 700,
-    });
-    const options = {
-      hostname: 'api.groq.com',
-      path: '/openai/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
-        'Content-Length': Buffer.byteLength(data),
-      },
-    };
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', chunk => { body += chunk; });
-      res.on('end', () => {
-        try {
-          const response = JSON.parse(body);
-          if (response.error) reject(new Error(response.error.message || 'Groq API error'));
-          else {
-            const content = normalizeModelText(response.choices?.[0]?.message?.content);
-            if (!content) reject(new Error('Groq returned an empty response'));
-            else resolve(response);
-          }
-        } catch { reject(new Error('Failed to parse Groq API response')); }
+async function callGroqAPI(messages) {
+  const groqMessages = [
+    { role: 'system', content: `You are an intelligent educational assistant for an AI Learning Platform. Use normal spaces and valid Markdown. For a simple learning request such as "explain HTML", return exactly this easy-to-read structure: first, one concise explanatory paragraph of 3-5 sentences; then a blank line; then the bold label **Important Points:**; then 5-8 short numbered points. Put every numbered point on its own new line. Do not use underlined headings made with === or ---, do not add many sections, and do not include code unless the user explicitly asks for code. For greetings, reply in 1-2 friendly sentences. Keep all answers accurate, simple, and concise.` },
+  ];
+  let hasImage = false;
+  for (const m of messages) {
+    if (m.imageBase64) {
+      hasImage = true;
+      groqMessages.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: m.content || 'Describe this image in detail.' },
+          { type: 'image_url', image_url: { url: m.imageBase64 } },
+        ],
       });
-    });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
-  });
+    } else {
+      groqMessages.push({ role: m.role, content: m.content || '' });
+    }
+  }
+
+  const primaryTextModel = (process.env.GROQ_MODEL || 'openai/gpt-oss-120b').trim();
+  const primaryVisionModel = (process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b').trim();
+
+  const textCandidates = [primaryTextModel, 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b', 'groq/compound'].filter((v, i, a) => v && a.indexOf(v) === i);
+  const visionCandidates = [primaryVisionModel, 'qwen/qwen3.6-27b', 'qwen/qwen3.8-27b'].filter((v, i, a) => v && a.indexOf(v) === i);
+  const candidates = hasImage ? visionCandidates : textCandidates;
+
+  let lastError = new Error('No Groq model candidates available');
+  for (const model of candidates) {
+    try {
+      const res = await new Promise((resolve, reject) => {
+        const data = JSON.stringify({
+          model,
+          messages: groqMessages,
+          temperature: 0.7,
+          max_tokens: 700,
+        });
+        const options = {
+          hostname: 'api.groq.com',
+          path: '/openai/v1/chat/completions',
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
+            'Content-Length': Buffer.byteLength(data),
+          },
+        };
+        const req = https.request(options, (res) => {
+          let body = '';
+          res.on('data', chunk => { body += chunk; });
+          res.on('end', () => {
+            try {
+              const response = JSON.parse(body);
+              if (response.error) reject(new Error(response.error.message || 'Groq API error'));
+              else {
+                const content = normalizeModelText(response.choices?.[0]?.message?.content);
+                if (!content) reject(new Error('Groq returned an empty response'));
+                else resolve(response);
+              }
+            } catch { reject(new Error('Failed to parse Groq API response')); }
+          });
+        });
+        req.on('error', reject);
+        req.write(data);
+        req.end();
+      });
+      return res;
+    } catch (err) {
+      console.warn(`Groq model '${model}' failed:`, err.message);
+      lastError = err;
+    }
+  }
+  throw lastError;
 }
 
 function callGroqStream(messages, onChunk, onDone, onError, imageBase64) {
@@ -161,8 +176,8 @@ function callGroqStream(messages, onChunk, onDone, onError, imageBase64) {
     }
   }
 
-  const textModel = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
-  const visionModel = (process.env.GROQ_VISION_MODEL || 'llama-3.2-11b-vision-preview').trim();
+  const textModel = (process.env.GROQ_MODEL || 'openai/gpt-oss-120b').trim();
+  const visionModel = (process.env.GROQ_VISION_MODEL || 'qwen/qwen3.6-27b').trim();
   const model = imageBase64 ? visionModel : textModel;
 
   const payload = JSON.stringify({

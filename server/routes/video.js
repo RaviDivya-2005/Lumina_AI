@@ -75,44 +75,61 @@ Provide a comprehensive analysis with the following sections:
 TRANSCRIPT:
 ${transcript}`;
 
-    const model = (process.env.GROQ_MODEL || 'llama-3.3-70b-versatile').trim();
-    const data = JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: 'You are an expert content analyst that provides detailed, well-structured analysis of video and audio content. Use markdown formatting.' },
-        { role: 'user', content: prompt },
-      ],
-      temperature: 0.5,
-      max_tokens: 4096,
-    });
+    const primaryModel = (process.env.GROQ_MODEL || 'openai/gpt-oss-120b').trim();
+    const candidates = [primaryModel, 'openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.6-27b'].filter((v, i, a) => v && a.indexOf(v) === i);
 
-    const options = {
-      hostname: 'api.groq.com',
-      path: '/openai/v1/chat/completions',
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
-        'Content-Length': Buffer.byteLength(data),
-      },
-    };
-
-    const req = https.request(options, (res) => {
-      let body = '';
-      res.on('data', (chunk) => { body += chunk; });
-      res.on('end', () => {
+    (async () => {
+      let lastError = new Error('No models responded');
+      for (const model of candidates) {
         try {
-          const parsed = JSON.parse(body);
-          if (parsed.error) reject(new Error(parsed.error.message || 'Analysis failed'));
-          else resolve(parsed.choices?.[0]?.message?.content || 'No analysis generated');
-        } catch {
-          reject(new Error('Failed to parse analysis response'));
+          const data = JSON.stringify({
+            model,
+            messages: [
+              { role: 'system', content: 'You are an expert content analyst that provides detailed, well-structured analysis of video and audio content. Use markdown formatting.' },
+              { role: 'user', content: prompt },
+            ],
+            temperature: 0.5,
+            max_tokens: 4096,
+          });
+
+          const options = {
+            hostname: 'api.groq.com',
+            path: '/openai/v1/chat/completions',
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
+              'Content-Length': Buffer.byteLength(data),
+            },
+          };
+
+          const analysisContent = await new Promise((resResolve, resReject) => {
+            const req = https.request(options, (res) => {
+              let body = '';
+              res.on('data', (chunk) => { body += chunk; });
+              res.on('end', () => {
+                try {
+                  const parsed = JSON.parse(body);
+                  if (parsed.error) resReject(new Error(parsed.error.message || 'Analysis failed'));
+                  else resResolve(parsed.choices?.[0]?.message?.content || 'No analysis generated');
+                } catch {
+                  resReject(new Error('Failed to parse analysis response'));
+                }
+              });
+            });
+            req.on('error', resReject);
+            req.write(data);
+            req.end();
+          });
+
+          return resolve(analysisContent);
+        } catch (err) {
+          console.warn(`Video analysis model '${model}' failed:`, err.message);
+          lastError = err;
         }
-      });
-    });
-    req.on('error', reject);
-    req.write(data);
-    req.end();
+      }
+      reject(lastError);
+    })();
   });
 }
 
