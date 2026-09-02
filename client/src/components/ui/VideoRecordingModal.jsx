@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Video, Square, Play, X, Check, Loader2 } from 'lucide-react';
+import { Video, Square, Play, X, Check, Loader2, RefreshCw } from 'lucide-react';
 
 export default function VideoRecordingModal({ isOpen, onClose, onComplete }) {
   const [isRecording, setIsRecording] = useState(false);
@@ -8,6 +8,7 @@ export default function VideoRecordingModal({ isOpen, onClose, onComplete }) {
   const [recordingTime, setRecordingTime] = useState(0);
   const [error, setError] = useState(null);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [facingMode, setFacingMode] = useState('user');
 
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -23,32 +24,48 @@ export default function VideoRecordingModal({ isOpen, onClose, onComplete }) {
     }
   }, []);
 
+  const initCamera = useCallback(async (mode = facingMode) => {
+    setIsInitializing(true);
+    setError(null);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: mode } },
+        audio: true
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.muted = true;
+      }
+      setIsInitializing(false);
+    } catch (err) {
+      setError('Camera or microphone access denied. Please allow permissions to record.');
+      setIsInitializing(false);
+    }
+  }, [facingMode]);
+
   useEffect(() => {
     if (isOpen) {
-      setIsInitializing(true);
-      setError(null);
       setRecordedBlob(null);
       setRecordingTime(0);
       chunksRef.current = [];
-      
-      navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-        .then(stream => {
-          streamRef.current = stream;
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.muted = true;
-          }
-          setIsInitializing(false);
-        })
-        .catch(err => {
-          setError('Camera or microphone access denied. Please allow permissions to record.');
-          setIsInitializing(false);
-        });
+      initCamera(facingMode);
     } else {
       cleanup();
     }
     return cleanup;
   }, [isOpen, cleanup]);
+
+  const toggleCamera = async () => {
+    if (isRecording) return;
+    const nextMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextMode);
+    await initCamera(nextMode);
+  };
 
   const startRecording = () => {
     if (!streamRef.current) return;
@@ -177,7 +194,7 @@ export default function VideoRecordingModal({ isOpen, onClose, onComplete }) {
               )}
             </div>
 
-            <div className="flex items-center justify-center gap-4">
+            <div className="flex flex-wrap items-center justify-center gap-3">
               {error || isInitializing ? null : !recordedBlob ? (
                 isRecording ? (
                   <button
@@ -187,12 +204,22 @@ export default function VideoRecordingModal({ isOpen, onClose, onComplete }) {
                     <Square className="w-5 h-5" /> Stop Recording
                   </button>
                 ) : (
-                  <button
-                    onClick={startRecording}
-                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors"
-                  >
-                    <Play className="w-5 h-5" /> Start Recording
-                  </button>
+                  <>
+                    <button
+                      onClick={toggleCamera}
+                      className="flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 dark:bg-white/10 dark:hover:bg-white/20 text-gray-700 dark:text-gray-200 rounded-xl font-medium transition-colors"
+                      title="Switch between front and rear camera"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      <span>Switch Cam ({facingMode === 'user' ? 'Front' : 'Rear'})</span>
+                    </button>
+                    <button
+                      onClick={startRecording}
+                      className="flex items-center gap-2 px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-medium transition-colors"
+                    >
+                      <Play className="w-5 h-5" /> Start Recording
+                    </button>
+                  </>
                 )
               ) : (
                 <>

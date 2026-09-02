@@ -17,6 +17,7 @@ import {
   Check,
   Camera,
   StopCircle,
+  RefreshCw,
 } from 'lucide-react';
 import StudentLayout from '../../components/layout/StudentLayout';
 import AdminLayout from '../../components/layout/AdminLayout';
@@ -60,6 +61,7 @@ export default function VideoAnalysis() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordedUrl, setRecordedUrl] = useState(null);
+  const [facingMode, setFacingMode] = useState('user'); // 'user' (front) or 'environment' (rear)
 
   const videoPreviewRef = useRef(null);
   const streamRef = useRef(null);
@@ -131,14 +133,18 @@ export default function VideoAnalysis() {
   };
 
   // Webcam actions
-  const startCamera = async () => {
+  const startCamera = async (mode = facingMode) => {
     setError(null);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
           height: { ideal: 720 },
-          facingMode: 'user'
+          facingMode: { ideal: mode }
         },
         audio: true
       });
@@ -155,6 +161,13 @@ export default function VideoAnalysis() {
       setError('Could not access your camera or microphone. Please check permissions.');
       console.error(err);
     }
+  };
+
+  const switchCamera = async () => {
+    if (isRecording) return;
+    const nextMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextMode);
+    await startCamera(nextMode);
   };
 
   const stopCamera = () => {
@@ -446,9 +459,17 @@ export default function VideoAnalysis() {
                           </div>
                         )}
                       </div>
-                      <div className="flex justify-center gap-3">
+                      <div className="flex flex-wrap justify-center gap-3">
                         {!isRecording ? (
                           <>
+                            <button
+                              onClick={switchCamera}
+                              className="px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-gray-600 hover:text-gray-900 hover:bg-slate-100 dark:bg-white/5 dark:border-white/10 dark:text-gray-400 dark:hover:text-white dark:hover:bg-white/10 transition-colors flex items-center gap-2"
+                              title="Switch between front and rear camera on mobile devices"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              <span>Switch Cam ({facingMode === 'user' ? 'Front' : 'Rear'})</span>
+                            </button>
                             <button
                               onClick={stopCamera}
                               className="px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 text-gray-600 hover:text-gray-900 hover:bg-slate-100 dark:bg-white/5 dark:border-white/10 dark:text-gray-400 dark:hover:text-white dark:hover:bg-white/10 transition-colors"
