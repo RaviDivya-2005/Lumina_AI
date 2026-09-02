@@ -115,7 +115,7 @@ function callGroqAPI(messages) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
         'Content-Length': Buffer.byteLength(data),
       },
     };
@@ -175,7 +175,7 @@ function callGroqStream(messages, onChunk, onDone, onError, imageBase64) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+      Authorization: `Bearer ${(process.env.GROQ_API_KEY || '').trim()}`,
       'Content-Length': Buffer.byteLength(payload),
     },
   };
@@ -293,11 +293,17 @@ const sendMessage = async (req, res) => {
     messages.push({ role: 'assistant', content: aiResponse, timestamp: new Date().toISOString() });
 
     // Strip imageBase64 before saving to Supabase (Supabase can't store large base64 reliably in JSONB)
-    const saveMessages = messages.map(m => {
-      if (m.imageBase64) return { role: m.role, content: m.content || '[Image attached]', timestamp: m.timestamp };
-      return m;
-    });
-    await supabaseRequest('PATCH', `/rest/v1/chat_histories?id=eq.${chatId}`, { messages: saveMessages, title });
+    if (!isLocalChat) {
+      try {
+        const saveMessages = messages.map(m => {
+          if (m.imageBase64) return { role: m.role, content: m.content || '[Image attached]', timestamp: m.timestamp };
+          return m;
+        });
+        await supabaseRequest('PATCH', `/rest/v1/chat_histories?id=eq.${chatId}`, { messages: saveMessages, title });
+      } catch (err) {
+        console.error('Failed to save chat to Supabase:', err.message);
+      }
+    }
 
     return res.status(200).json({
       success: true,
